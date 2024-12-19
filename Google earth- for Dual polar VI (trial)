@@ -1,0 +1,102 @@
+// Define the Area of Interest (AOI)
+var aoi = ee.Geometry.Polygon(
+  [[
+    [72.28572635398984, 23.152475004733255],
+    [72.98335818992734, 23.152475004733255],
+    [72.98335818992734, 23.633949214558577],
+    [72.28572635398984, 23.633949214558577],
+    [72.28572635398984, 23.152475004733255]
+  ]] 
+);
+
+// Load Sentinel-1 data (Use your date range and polarization preferences)
+var sentinel1 = ee.ImageCollection("COPERNICUS/S1_GRD")
+  .filterBounds(aoi)  // Filter by AOI
+  .filterDate('2023-01-01', '2023-12-31')  // Filter by date range
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))  // Ensure dual-pol data
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))  // Ensure dual-pol data
+  .select(['VV', 'VH']);  // Select VV and VH polarizations
+
+// 1. Preprocessing: Speckle Filtering (using Lee Filter for example)
+var filteredImages = sentinel1.map(function(image) {
+  return image.focal_median(2, 'square', 'meters');  // Simple median filter for speckle reduction
+});
+
+// 2. Covariance Matrix Calculation
+var computeCovariance = function(image) {
+  var vv = image.select('VV');
+  var vh = image.select('VH');
+  
+  // Calculate covariance components
+  var covVV_VV = vv.multiply(vv).rename('covVV_VV');  // VV * VV
+  var covVV_VH = vv.multiply(vh).rename('covVV_VH');  // VV * VH
+  var covVH_VH = vh.multiply(vh).rename('covVH_VH');  // VH * VH
+  
+  // Stack the components into a single image (2x2 covariance matrix)
+  var covMatrix = ee.Image.cat(covVV_VV, covVV_VH, covVV_VH, covVH_VH);
+  
+  return covMatrix;
+};
+
+var covarianceImages = filteredImages.map(computeCovariance);
+
+// 3. Degree of Polarization (m) Calculation
+var computeDegreeOfPolarization = function(covMatrix) {
+  // Extract the covariance matrix components
+  var covVV_VV = covMatrix.select('covVV_VV');
+  var covVV_VH = covMatrix.select('covVV_VH');
+  var covVH_VH = covMatrix.select('covVH_VH');
+  
+  // Calculate the trace: Trace = lambda1 + lambda2
+  var trace = covVV_VV.add(covVH_VH);
+  
+  // Calculate the determinant: Det = lambda1 * lambda2 - covVV_VH^2
+  var determinant = covVV_VV.multiply(covVH_VH).subtract(covVV_VH.multiply(covVV_VH));
+  
+  // Calculate m (degree of polarization): m = Trace / Determinant
+  var m = trace.divide(determinant);
+  
+  return m;
+};
+
+// 4. Beta Calculation (lambda1 / Span)
+var computeBeta = function(covMatrix) {
+  var covVV_VV = covMatrix.select('covVV_VV');
+  var covVH_VH = covMatrix.select('covVH_VH');
+  
+  // Span = Trace (lambda1 + lambda2)
+  var span = covVV_VV.add(covVH_VH);
+  
+  // Calculate the dominant eigenvalue ratio: beta = lambda1 / Span
+  var beta = covVV_VV.divide(span);
+  
+  return beta;
+};
+
+// 5. DpRVI Calculation
+var computeDpRVI = function(image) {
+  var covMatrix = computeCovariance(image);
+  var m = computeDegreeOfPolarization(covMatrix);
+  var beta = computeBeta(covMatrix);
+  
+  // Calculate DpRVI = 1 - m * beta
+  var dpRVI = ee.Image(1).subtract(m.multiply(beta));
+  
+  return dpRVI;
+};
+
+// Apply the DpRVI calculation to the filtered images
+var dpRVIImages = filteredImages.map(computeDpRVI);
+
+// 6. Visualize DpRVI
+Map.centerObject(aoi, 10);
+Map.addLayer(dpRVIImages, {min: 0, max: 1, palette: ['blue', 'green', 'yellow', 'red']}, 'DpRVI');
+
+// Optionally, you can export the result:
+Export.image.toDrive({
+  image: dpRVIImages.median(),
+  description: 'DpRVI_Export',
+  scale: 10,
+  region: aoi,
+  fileFormat: 'GeoTIFF'
+});
