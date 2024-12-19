@@ -1,0 +1,82 @@
+import numpy as np
+import pandas as pd
+from scipy.optimize import curve_fit
+import matplotlib.pyplot as plt
+
+
+# Data: npcri_mean and Actual yield
+npcri_mean = [
+   0.167419906, 0.187598628, 0.404092419, 0.384286934, 0.359341535, 0.320417186, 0.356929612,
+   0.370176601, 0.394732374, 0.326309847, 0.351961555, 0.119292378, 0.455720069, 0.335087267,
+   0.14244569, 0.386678375, 0.412700845, 0.001955423, 0.072677384, 0.322086826, 0.177291451,
+   0.40202701, 0.304776858, 0.395429043, 0.300016832, 0.351222801, 0.32335503, 0.327356886,
+   0.358558842, 0.390617083, 0.223544921, 0.193704935, 0.388195356, 0.161421661, 0.406255197,
+   0.317427476, 0.347550538, 0.184544458, 0.352658297, 0.334791145, 0.385515943, 0.251975835,
+   0.386398702, 0.212057488, 0.422154234, 0.464606376, 0.067742028, 0.288474053, 0.170954831,
+   0.356053046, 0.302349183, 0.305833423, 0.308253752, 0.284501998, 0.355825344, 0.152496503,
+   0.364327687
+]
+
+
+actual_yield = [
+   167.52, 407.51, 557.77, 243.26, 395.78, 366.84, 258.67, 299.71, 299.71, 590.03, 533.09, 331.97,
+   251.32, 452.12, 82.95, 384.91, 550.43, 399.31, 587.02, 337.62, 561, 343.11, 505.72, 267.45,
+   537.09, 214.25, 573.9, 452.89, 199.27, 557.77, 462.81, 231.27, 469.11, 274.01, 406.65, 393.43,
+   551.7, 253.68, 331.97, 287.09, 509.78, 477.13, 590.03, 594.8, 372.29, 408.15, 344.48, 400.02,
+   279.7, 623.34, 645.78, 628.87, 638.42, 643.93, 622.29, 607.34, 686.81
+]
+
+
+# Create DataFrame from data
+data = {'npcri_mean': npcri_mean, 'Actual_yield': actual_yield}
+df = pd.DataFrame(data)
+
+
+# Define the exponential model
+def exponential(x, a, b):
+   return a * np.exp(b * x)
+
+
+# Fit the exponential model to the data
+params, covariance = curve_fit(exponential, df['npcri_mean'], df['Actual_yield'], p0=[500, 0.1])
+
+
+# Extract the fitted parameters
+a_fit, b_fit = params
+print(f"Fitted parameters: a = {a_fit}, b = {b_fit}")
+
+
+# Generate the fitted yield values using the model
+df['Yield_Fitted'] = exponential(df['npcri_mean'], *params)
+
+
+# Plot the original data and the fitted curve
+plt.scatter(df['npcri_mean'], df['Actual_yield'], color='blue', label='Data')
+plt.plot(df['npcri_mean'], df['Yield_Fitted'], color='red', label='Fitted Curve')
+plt.title('NPCRI vs Yield - Fitted Curve')
+plt.xlabel('NPCRI Mean')
+plt.ylabel('Actual Yield')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+
+# Function to predict yield based on NPCRI input
+def predict_yield(npcri_value):
+   predicted_yield = exponential(npcri_value, *params)
+   return predicted_yield
+
+
+# Interactive input for multiple NPCRI values
+while True:
+   try:
+       npcri_input = float(input("Enter NPCRI value (between 0 and 1, or 'exit' to quit): "))
+       if npcri_input < 0 or npcri_input > 1:
+           print("NPCRI value must be between 0 and 1.")
+       else:
+           yield_prediction = predict_yield(npcri_input)
+           print(f"Predicted Yield for NPCRI {npcri_input}: {yield_prediction}")
+   except ValueError:
+       print("Invalid input. Please enter a valid number or 'exit' to quit.")
+   except KeyboardInterrupt:
+       break
