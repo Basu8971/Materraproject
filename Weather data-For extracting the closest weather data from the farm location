@@ -1,0 +1,106 @@
+import pandas as pd
+from geopy.distance import geodesic
+
+
+# Load the CSV file into a pandas DataFrame
+file_path = 'C:\\Users\\basavaraj.nargal_mat\\Downloads\\Weather data for modelling - Sheet1.csv'  # Adjust the path accordingly
+df = pd.read_csv(file_path)
+
+
+
+
+# Function to compute distance between two latitude/longitude points in kilometers
+def calculate_distance(lat1, lon1, lat2, lon2):
+   return geodesic((lat1, lon1), (lat2, lon2)).kilometers
+
+
+
+
+# Extract latitude and longitude of weather stations
+weather_stations = df[['Lat', 'Long']].dropna().values
+
+
+
+
+# Function to check if the GeoTagging string is valid
+def is_valid_geo_tag(geo_tagging):
+   try:
+       # Split by comma and convert to float
+       coords = geo_tagging.split(',')
+       if len(coords) == 2:
+           lat, lon = map(float, coords)
+           return True
+   except ValueError:
+       pass
+   return False
+
+
+
+
+# Function to find the closest weather station within 50 km and return the distance
+def find_closest_weather_station(geo_tagging):
+   min_distance = float('inf')
+   closest_station = None
+   distance_to_closest_station = None
+
+
+   # Check if geo_tagging is valid
+   if pd.notna(geo_tagging) and is_valid_geo_tag(geo_tagging):
+       geo_tagging_coords = tuple(map(float, geo_tagging.split(',')))
+
+
+       for station in weather_stations:
+           station_coords = tuple(station)
+           distance = calculate_distance(geo_tagging_coords[0], geo_tagging_coords[1], station_coords[0],
+                                         station_coords[1])
+
+
+           if distance <= 50 and distance < min_distance:
+               min_distance = distance
+               closest_station = station_coords
+               distance_to_closest_station = min_distance
+
+
+   # Return the closest station coordinates and the distance, or None if no station is within 50 km
+   return closest_station, distance_to_closest_station if closest_station else (None, None)
+
+
+
+
+# Apply the function to each row in the DataFrame and create columns for the closest weather station and distance
+df[['Closest Weather Station', 'Distance to Closest Weather Station']] = df['GeoTagging'].apply(
+   lambda geo_tagging: pd.Series(find_closest_weather_station(geo_tagging))
+)
+
+
+# Prepare the output DataFrame with FarmerName, VillageName, Closest Weather Station coordinates, and Distance in kilometers
+output_df = df[['FarmerName', 'villagename', 'Closest Weather Station', 'Distance to Closest Weather Station']].copy()
+
+
+# Split 'Closest Weather Station' into separate latitude and longitude columns
+output_df[['Closest Station Latitude', 'Closest Station Longitude']] = output_df['Closest Weather Station'].apply(
+   lambda x: pd.Series([x[0], x[1]] if x is not None else [None, None])
+)
+
+
+# Ensure distance is in kilometers (only if it's a valid number)
+output_df['Distance to Closest Weather Station'] = output_df['Distance to Closest Weather Station'].apply(
+   lambda x: f"{x:.2f} km" if isinstance(x, (float, int)) and x is not None else 'None'
+)
+
+
+# Drop the original 'Closest Weather Station' column as it is no longer needed
+output_df.drop(columns=['Closest Weather Station'], inplace=True)
+
+
+# Replace all NaN, None, or empty spaces with the string 'None'
+output_df = output_df.applymap(lambda x: 'None' if pd.isna(x) or x == '' else x)
+
+
+# Save the result to a new CSV file
+output_file_path = r'C:\\Users\\basavaraj.nargal_mat\\Downloads\\farmer_weather_station_output.csv'  # Change path as needed
+output_df.to_csv(output_file_path, index=False)
+
+
+# Inform the user that the file is saved
+print(f"Output file saved to: {output_file_path}")
