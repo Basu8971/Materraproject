@@ -1,0 +1,51 @@
+// Load the uploaded CSV file as a FeatureCollection
+var farmersCSV = ee.FeatureCollection('projects/ee-basavarajnargal/assets/Farmerslist');
+
+// Print the CSV data to verify the structure
+print('Farmers CSV:', farmersCSV);
+
+// Function to create polygons from the coordinate string
+var createPolygonFromCoordinates = function(feature) {
+  var coordinatesString = feature.get('Coordinates');  // Get the coordinates string
+  var coordinatesList = ee.List(ee.String(coordinatesString).split(' '));  // Split into individual coordinate strings
+  
+  // Create a list of latitude/longitude pairs by parsing each string and converting them to numbers
+  var coordinates = coordinatesList.map(function(coord) {
+    var latLng = ee.List(ee.String(coord).split(',').slice(0, 2)).map(ee.Number.parse);  // Extract lat, lon and parse them
+    return latLng;  // Return the [lat, lon] pair
+  });
+  
+  // Create a polygon using the parsed coordinates
+  var polygon = ee.Geometry.Polygon(coordinates);  // Create the polygon geometry
+  return feature.setGeometry(polygon);  // Set the geometry of the feature
+};
+
+// Apply the function to all features in the CSV to create polygons
+var farmersPolygons = farmersCSV.map(createPolygonFromCoordinates);
+
+// Print the polygons to verify
+print('Farmers Polygons:', farmersPolygons);
+
+// Visualize the polygons on the map (in red color)
+Map.addLayer(farmersPolygons, {color: 'red'}, 'Farmers Polygons');
+
+// Center the map based on the farmers' polygons
+Map.centerObject(farmersPolygons, 10);  // Zoom to the extent of the polygons
+
+// Assuming you have a classified image (e.g., 'classifiedImage'), sample the classified image within the polygons
+var sampledFeatures = classifiedImage.reduceRegions({
+  collection: farmersPolygons,  // Use the polygons as regions
+  reducer: ee.Reducer.mode(),  // Use mode to get the dominant class within the polygon
+  scale: 30  // Set the scale (adjust based on your image resolution)
+});
+
+// Print the sampled features to check the classification result
+print('Sampled Features:', sampledFeatures);
+
+// Optionally, export the sampled features as a CSV for further analysis
+Export.table.toDrive({
+  collection: sampledFeatures,
+  description: 'Exported_Sampled_Features',
+  fileFormat: 'CSV'
+});
+
