@@ -1,0 +1,28 @@
+import requests
+
+# API URL for deleting parcels
+base_url = "https://global.geocledian.com/agknow/api/v4/parcels/{parcel_id}?key=1234"  # Replace with your actual API key
+
+# List of parcel IDs to delete
+parcel_ids_to_delete = [56456, 58641, 58639, 58640]
+
+# Headers (no need for API key in headers as it's in the URL)
+headers = {
+    "Content-Type": "application/json",
+}
+
+# Function to delete a parcel by its ID
+def delete_parcel(parcel_id):
+    url = base_url.format(parcel_id=parcel_id)
+    response = requests.delete(url, headers=headers)
+    
+    # Check response status
+    if response.status_code == 200:
+        print(f"Parcel with ID {parcel_id} deleted successfully.")
+    else:
+        print(f"Failed to delete parcel with ID {parcel_id}. Status Code: {response.status_code}")
+        print("Response:", response.text)
+
+# Delete parcels one by one
+for parcel_id in parcel_ids_to_delete:
+    delete_parcel(parcel_id)
