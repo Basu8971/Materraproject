@@ -1,0 +1,117 @@
+// Import the Farmers list CSV containing Farmer Name and Coordinates
+var farmers = ee.FeatureCollection('projects/ee-basavarajnargal/assets/Farmerslist1'); // Replace with your actual asset path
+
+// Function to create a polygon from a string of coordinates (lat, lon, altitude or just lat, lon)
+function createPolygonFromCoordinates(coordinatesString) {
+  // Split the coordinates string into individual coordinate triplets (lat, lon, altitude)
+  var coordList = ee.List(coordinatesString.split(' ')).map(function(coord) {
+    // Split each coordinate triplet by the comma and take the first two values (lat, lon)
+    var lonLat = ee.List(ee.String(coord).split(',')).slice(0, 2).map(function(val) {
+      return ee.Number.parse(val); // Convert each value to a number
+    });
+    return lonLat;  // Return lat/lon as a list of numbers
+  });
+  
+  // Create a polygon geometry from the list of coordinates (lat, lon)
+  var polygon = ee.Geometry.Polygon(coordList);
+  
+  // Return the polygon geometry
+  return polygon;
+}
+
+// Function to create a FeatureCollection of polygons for farmers
+function createFeatureCollection(farmers) {
+  return farmers.map(function(farmer) {
+    // Get the coordinates from the farmer's data (coordinates as a string)
+    var coordinates = ee.String(farmer.get('Coordinates'));
+    
+    // Create polygon from coordinates string
+    var polygon = createPolygonFromCoordinates(coordinates);
+    
+    // Return the farmer feature with the polygon geometry added as a property
+    return farmer.setGeometry(polygon);
+  });
+}
+
+// Apply the function to create polygons from coordinates for each farmer
+var farmersWithPolygons = createFeatureCollection(farmers);
+
+// Visualize the polygons on the map
+Map.centerObject(farmersWithPolygons, 10);  // Zoom to the region of interest
+Map.addLayer(farmersWithPolygons, {}, 'Farmers Polygons');
+
+// Sentinel-1 ImageCollection for 2024 (filtering by date, polarization, etc.)
+var sen1 = ee.ImageCollection("COPERNICUS/S1_GRD")
+  .filterDate('2024-01-01', '2024-12-31')  // Filter from 1 Jan 2024 to 31 Dec 2024
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+  .select('VV', 'VH');
+
+// Function to compute RVI for each farmer polygon
+function computeRVIForFarmers(farmer) {
+  // Get the polygon geometry for the farmer
+  var geometry = farmer.geometry();
+  
+  // Filter the Sentinel-1 data to include only the required time range and region
+  var filteredSen1 = sen1.filterBounds(geometry);
+  
+  // Calculate Radar Vegetation Index (RVI) for the filtered Sentinel-1 images
+  var rvi = filteredSen1.map(function(img) {
+    var sigma = ee.Image(10).pow(img.divide(10));  // Apply log10 scaling
+    var index = sigma.expression('(4 * vh) / (vh + vv)', {
+      'vv': sigma.select('VV'), 'vh': sigma.select('VH')
+    }).rename('RVI');
+    var smooth = index.focalMedian(30, 'square', 'meters');  // Apply a focal median filter
+    return smooth.copyProperties(img, ['system:time_start', 'system:time_end']);
+  });
+  
+  // Extract time series data for RVI (mean RVI values per farmer polygon)
+  var rviTimeSeries = rvi.map(function(image) {
+    var meanRVI = image.reduceRegion({
+      reducer: ee.Reducer.mean(),  // Calculate mean RVI for the polygon
+      geometry: geometry,
+      scale: 30,  // Use the appropriate resolution for your region
+      crs: 'EPSG:4326'
+    });
+    return ee.Feature(null, {
+      'farmer': farmer.get('Farmer Name'),  // Use 'Farmer Name' column for farmer name
+      'date': image.get('system:time_start'),
+      'rvi': meanRVI.get('RVI')  // Store the mean RVI value for each date
+    });
+  });
+  
+  // Convert the time series to a FeatureCollection
+  return ee.FeatureCollection(rviTimeSeries);
+}
+
+// Map the function over all farmers to compute RVI for each polygon
+var rviResults = farmersWithPolygons.map(function(farmer) {
+  return computeRVIForFarmers(farmer);
+}).flatten();  // Flatten the list of feature collections into one
+
+// Print the results to check
+print("RVI Time Series for Farmers:", rviResults);
+
+// Export RVI values as CSV to Google Drive
+Export.table.toDrive({
+  collection: rviResults,
+  description: 'RVI_CSV_Farmers_2024',  // CSV file name
+  fileFormat: 'CSV',  // File format
+  folder: 'test',  // Folder in Google Drive to store the CSV
+  fileNamePrefix: 'RVI_CSV_Farmers_2024',  // Prefix for the exported file
+  selectors: ['farmer', 'date', 'rvi']  // Fields to include in the CSV (farmer, date, RVI value)
+});
+
+// Create a visualization layer for RVI of all farmers using the polygons
+var farmersRVI = rviResults.map(function(feature) {
+  // Create a feature with RVI value as the property to use for visualization
+  var rviValue = feature.get('rvi');
+  var farmerName = feature.get('farmer');
+  return feature.set('RVI_Value', rviValue).set('farmer', farmerName);
+});
+
+// Visualize the RVI values for each farmer (optional)
+Map.addLayer(farmersRVI, {min: 0, max: 1, palette: ['blue', 'green', 'yellow', 'red']}, 'RVI for all Farmers');
+Map.centerObject(farmersWithPolygons, 10);  // Center map around the farmers' polygons
+
