@@ -29,7 +29,7 @@ ws.append(headers)
 
 # Function to fetch phenology data for a given parcel ID
 def fetch_phenology_data(parcel_id):
-   url = f"https://global.geocledian.com/agknow/api/v4/parcels/{parcel_id}/phenology?startdate=2023-05-20&enddate=2023-12-31&key=eb57f876-aae3-4887-9536-6bff47b9291b"
+   url = f"https://global.geocledian.com/agknow/api/v4/parcels/{parcel_id}/phenology?startdate=2023-05-20&enddate=2023-12-31&key=1234"
    response = requests.get(url)
 
 
