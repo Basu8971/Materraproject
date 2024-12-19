@@ -1,0 +1,95 @@
+import requests
+import json
+import csv
+
+
+# API endpoint with API key in the query parameter
+url = "https://global.geocledian.com/agknow/api/v4/parcels?key=eb57f876-aae3-4887-9536-6bff47b9291b"  # Replace with your actual API key
+
+
+
+
+# Function to register a parcel
+def register_parcel(parcel_data):
+   headers = {
+       "Content-Type": "application/json",
+   }
+
+
+   # Sending POST request to register the parcel
+   response = requests.post(url, headers=headers, data=json.dumps(parcel_data))
+
+
+   # Check response status
+   if response.status_code == 200:
+       print(f"Parcel registered successfully for {parcel_data['name']}")
+       print("Parcel ID:", response.json().get("content", {}).get("parcel_id"))
+       print("Response:", response.json())
+   else:
+       print(f"Failed to register parcel for {parcel_data['name']}. Status Code: {response.status_code}")
+       print("Response:", response.text)
+
+
+
+
+# Read CSV file and process each row
+def process_csv_and_register_parcels(csv_file_path):
+   with open(csv_file_path, newline='') as csvfile:
+       reader = csv.DictReader(csvfile)
+
+
+       for row in reader:
+           # Extract data from the CSV
+           farmer_name = row['Farmer Name']
+           land_id = row['Land ID']
+           region = row['Region']
+           crop = "Cotton"  # Static crop type for all parcels
+           planting = "2023-05-20"  # Static planting date for all parcels
+           harvest = "2023-12-31"  # Static harvest date for all parcels
+
+
+           # Extract coordinates and format as a list of lists
+           coordinates = row['Coordinates'].strip().split(' ')
+           coordinates_list = [[float(coord.split(',')[0]), float(coord.split(',')[1])] for coord in coordinates]
+
+
+           # Prepare parcel data for API request
+           parcel_data = {
+               "crop": crop,  # Crop type
+               "name": farmer_name,  # Parcel name (Farmer's name + Land ID)
+               "entity": region,  # Entity (Region)
+               "planting": planting,  # Planting date
+               "harvest": harvest,  # Harvest date
+               "userdata": {
+                   "group": 1,  # Example group
+                   "subgroup": 12  # Example subgroup
+               },
+               "geometry": {
+                   "type": "Polygon",  # Geometry type
+                   "coordinates": [coordinates_list]  # List of coordinates for the polygon
+               }
+           }
+
+
+           # Register the parcel
+           register_parcel(parcel_data)
+
+
+
+
+# Main function to process the CSV and register parcels
+def main():
+   # Path to the CSV file
+   csv_file_path = r"C:\Users\basavaraj.nargal_mat\Downloads\Farmers list - yield 0to600.csv"  # Update with actual path
+
+
+   # Process the CSV and register parcels
+   process_csv_and_register_parcels(csv_file_path)
+
+
+
+
+# Run the script
+if __name__ == '__main__':
+   main()
+
