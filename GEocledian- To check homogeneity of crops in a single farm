@@ -1,0 +1,91 @@
+import requests
+import json
+import csv
+import os
+from datetime import datetime
+
+
+# Base URL for the API
+BASE_URL = "https://global.geocledian.com/agknow/api/v4/parcels/{}/homogeneity"
+
+
+# Parameters for the request
+start_date = "2023-06-01"
+end_date = "2023-11-15"
+api_key = "eb57f876-aae3-4887-9536-6bff47b9291b"
+
+
+
+
+# Function to fetch data for a single parcel ID
+def fetch_parcel_data(parcel_id):
+   url = BASE_URL.format(parcel_id)
+   params = {
+       "startdate": start_date,
+       "enddate": end_date,
+       "key": api_key
+   }
+   response = requests.get(url, params=params)
+   if response.status_code == 200:
+       # If successful, return the JSON data
+       return response.json()
+   else:
+       # Handle errors (e.g., 404, 500)
+       print(f"Error fetching data for parcel ID {parcel_id}: {response.status_code}")
+       return None
+
+
+
+
+# Function to save data to a CSV file in Downloads folder
+def save_to_csv(data, filename="parcels_data.csv"):
+   # Get the user's Downloads folder
+   downloads_folder = os.path.join(os.path.expanduser("~"), "Downloads")
+
+
+   # Full path to save the CSV file
+   file_path = os.path.join(downloads_folder, filename)
+
+
+   # Open the file for writing
+   with open(file_path, mode='w', newline='') as file:
+       writer = csv.writer(file)
+
+
+       # Check if there's any data to write
+       if data:
+           # Write header (assuming the structure of data is the same)
+           writer.writerow(data[0].keys())  # Assuming the first item has all the field names
+           for record in data:
+               writer.writerow(record.values())  # Write each record's values
+
+
+   print(f"Data saved to {file_path}")
+
+
+
+
+# Main function to loop through parcel IDs and fetch data
+def fetch_all_parcels_data(start_id, end_id):
+   results = []
+   for parcel_id in range(start_id, end_id + 1):
+       print(f"Fetching data for parcel ID {parcel_id}...")
+       data = fetch_parcel_data(parcel_id)
+       if data:
+           results.append(data)
+   return results
+
+
+
+
+# Fetch data for all parcels in the range and save it
+if __name__ == "__main__":
+   # Fetch data for all parcels
+   all_parcels_data = fetch_all_parcels_data(58765, 58893)
+
+
+   # Save the collected data to a CSV file
+   save_to_csv(all_parcels_data)
+
+
+   print(f"Finished fetching data for parcels 58765 to 58893.")
