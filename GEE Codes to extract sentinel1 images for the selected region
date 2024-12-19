@@ -1,0 +1,81 @@
+// Define the new region of interest (ROI) using the new coordinates
+var cor = [
+  [72.28572635398984, 23.152475004733255],
+  [72.98335818992734, 23.152475004733255],
+  [72.98335818992734, 23.633949214558577],
+  [72.28572635398984, 23.633949214558577],
+  [72.28572635398984, 23.152475004733255]
+];
+
+var geometry = ee.Geometry.Polygon(cor);
+
+// Center the map on the geometry
+Map.centerObject(geometry);
+
+// Define the time range for the image collection (2020-2021)
+var time_start = '2022', time_end = '2023';
+
+// Load the Sentinel-1 ImageCollection (VV polarization)
+var sen1 = ee.ImageCollection("COPERNICUS/S1_GRD")
+  .filterDate(time_start, time_end)
+  .filterBounds(geometry)
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+  .select('VV');
+
+// Filter ascending and descending passes
+var asc = sen1.filter(ee.Filter.eq('orbitProperties_pass', 'ASCENDING'));
+var des = sen1.filter(ee.Filter.eq('orbitProperties_pass', 'DESCENDING'));
+
+// Function to compute monthly mean for ascending and descending passes
+var computeMonthlyMeans = function(month) {
+  var asc_month = asc.filter(ee.Filter.calendarRange(month, month, 'month')).mean().rename('asc');
+  var des_month = des.filter(ee.Filter.calendarRange(month, month, 'month')).mean().rename('des');
+  var date = ee.Date.fromYMD(2023, month, 1);
+  return asc_month.addBands(des_month)
+    .set('system:time_start', date.millis())
+    .set('system:index', date.format('YYYY-MM'));
+};
+
+// Generate the monthly ImageCollection
+var months = ee.List.sequence(1, 12);
+var sen1_monthly = ee.ImageCollection(months.map(function(month) {
+  return computeMonthlyMeans(month);
+}));
+
+// Apply speckle filtering (focal mean) to the images
+var applySpeckleFilter = function(image) {
+  return image.focalMean(30, 'square', 'meters').copyProperties(image, image.propertyNames());
+};
+var speckledImages = sen1_monthly.map(applySpeckleFilter);
+
+// Add the layers for ascending and descending passes
+Map.addLayer(speckledImages.select('asc').toBands().clip(geometry), {}, 'Ascending', false);
+Map.addLayer(speckledImages.select('des').toBands().clip(geometry), {}, 'Descending', false);
+
+// Define the point for which to extract data
+var cor2 = [72.59696743039153, 23.38345430825258];
+var geometry2 = ee.Geometry.Point(cor2);
+
+
+
+// Export the ascending and descending images to Google Drive
+Export.image.toDrive({
+  image: speckledImages.select('asc').toBands().clip(geometry),
+  description: 'sar_asc',
+  scale: 30,
+  region: geometry,
+  maxPixels: 1e13,
+  crs: 'EPSG:4326',
+  folder: 'test'
+});
+
+Export.image.toDrive({
+  image: speckledImages.select('des').toBands().clip(geometry),
+  description: 'sar_des',
+  scale: 30,
+  region: geometry,
+  maxPixels: 1e13,
+  crs: 'EPSG:4326',
+  folder: 'test'
+});
