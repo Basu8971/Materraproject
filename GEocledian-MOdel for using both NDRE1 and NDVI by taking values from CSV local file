@@ -1,0 +1,124 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
+from sklearn.metrics import r2_score
+
+
+# Load the CSV file into a pandas DataFrame
+file_path = r"C:\Users\basavaraj.nargal_mat\Downloads\Farmers list-2 - Sheet22.csv"
+df = pd.read_csv(file_path)
+
+
+# Check the first few rows of the data to ensure it's loaded correctly
+print(df.head())
+
+
+
+
+# Define an exponential model for fitting (nonlinear relationship)
+def exponential(x, a, b):
+   return a * np.exp(b * x)
+
+
+
+
+# Function to fit the exponential model and plot
+def fit_model(input_column, output_column, model_name):
+   # Fit the exponential model to the data
+   params, covariance = curve_fit(exponential, df[input_column], df[output_column], p0=[500, 0.1])
+
+
+   # Get the fitted parameters
+   a_fit, b_fit = params
+   print(f"Fitted parameters for {model_name}: a = {a_fit}, b = {b_fit}")
+
+
+   # Generate the fitted values using the model
+   df[f'{model_name}_Fitted'] = exponential(df[input_column], *params)
+
+
+   # Plot the original data and the fitted curve
+   plt.scatter(df[input_column], df[output_column], color='blue', label='Data')
+   plt.plot(df[input_column], df[f'{model_name}_Fitted'], color='red', label='Fitted Curve')
+   plt.title(f'{model_name} vs Yield - Fitted Curve')
+   plt.xlabel(model_name)
+   plt.ylabel('Yield')
+   plt.legend()
+   plt.grid(True)
+   plt.show()
+
+
+   # Calculate and print R-squared value
+   r2 = r2_score(df[output_column], df[f'{model_name}_Fitted'])
+   print(f"R-squared for {model_name}: {r2:.4f}")
+
+
+   return params
+
+
+
+
+# Fit the model for Mean NDRE1 vs Yield
+ndre1_params = fit_model('Mean NDRE1', 'Yield', 'Mean NDRE1')
+
+
+# Fit the model for Mean NDVI vs Yield
+ndvi_params = fit_model('Mean NDVI', 'Yield', 'Mean NDVI')
+
+
+
+
+# Function to predict yield based on the input value (NDRE1 or NDVI)
+def predict_yield(input_value, model_params, model_type):
+   # Ensure the input value is within a valid range
+   if input_value < 0 or input_value > 1:
+       raise ValueError(f"{model_type} value must be between 0 and 1.")
+
+
+   # Select the correct model parameters based on the input type
+   a, b = model_params
+
+
+   # Predict yield using the exponential model
+   predicted_yield = exponential(input_value, a, b)
+   return predicted_yield
+
+
+
+
+# Test the model by inputting values for either Mean NDRE1 or Mean NDVI
+while True:
+   try:
+       # Get user input for either Mean NDRE1 or Mean NDVI
+       user_input = input(
+           "Enter a value for either 'Mean NDRE1' or 'Mean NDVI' to predict the yield, or 'exit' to quit: ")
+
+
+       if user_input.lower() == 'exit':
+           break
+
+
+       # Convert the user input to float
+       input_value = float(user_input)
+
+
+       # Ask the user to choose between Mean NDRE1 or Mean NDVI
+       model_type = input("Enter 'NDRE1' for Mean NDRE1 or 'NDVI' for Mean NDVI: ").strip().lower()
+
+
+       if model_type == 'ndre1':
+           predicted_yield = predict_yield(input_value, ndre1_params, 'Mean NDRE1')
+       elif model_type == 'ndvi':
+           predicted_yield = predict_yield(input_value, ndvi_params, 'Mean NDVI')
+       else:
+           print("Invalid model type entered. Please enter either 'NDRE1' or 'NDVI'.")
+           continue
+
+
+       # Print the predicted yield
+       print(f"Predicted Yield for {model_type} = {input_value}: {predicted_yield:.2f} kg")
+
+
+   except ValueError as e:
+       print(f"Error: {e}")
