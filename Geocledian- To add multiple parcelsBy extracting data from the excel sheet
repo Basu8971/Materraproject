@@ -4,7 +4,7 @@ import csv
 
 
 # API endpoint with API key in the query parameter
-url = "https://global.geocledian.com/agknow/api/v4/parcels?key=eb57f876-aae3-4887-9536-6bff47b9291b"  # Replace with your actual API key
+url = "https://global.geocledian.com/agknow/api/v4/parcels?key=1234"  # Replace with your actual API key
 
 
 
