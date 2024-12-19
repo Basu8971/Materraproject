@@ -1,0 +1,97 @@
+import requests
+import pandas as pd
+import os
+from openpyxl import Workbook
+
+
+# Get the path for Downloads folder (This works on Windows, change if needed)
+downloads_folder = os.path.join(os.path.expanduser('~'), 'Downloads')
+file_path = os.path.join(downloads_folder, "phenology_data.xlsx")
+
+
+# Create a new workbook and add a worksheet
+wb = Workbook()
+ws = wb.active
+ws.title = "Phenology Data"
+
+
+# Add headers for the columns in Excel
+headers = [
+   'Parcel ID', 'Start Date', 'Start Name', 'Start Mean',
+   'Peak Date', 'Peak Name', 'Peak Mean',
+   'End Date', 'End Name', 'End Mean',
+   'Duration', 'Growth Rate'
+]
+ws.append(headers)
+
+
+
+
+# Function to fetch phenology data for a given parcel ID
+def fetch_phenology_data(parcel_id):
+   url = f"https://global.geocledian.com/agknow/api/v4/parcels/{parcel_id}/phenology?startdate=2023-05-20&enddate=2023-12-31&key=eb57f876-aae3-4887-9536-6bff47b9291b"
+   response = requests.get(url)
+
+
+   if response.status_code == 200:
+       data = response.json()
+       if 'content' in data and data['content']:
+           markers = data['content'][0]['marker']
+           season_data = {
+               'start_date': markers[0]['date'] if len(markers) > 0 else None,
+               'start_name': markers[0]['name'] if len(markers) > 0 else None,
+               'start_mean': markers[0]['mean'] if len(markers) > 0 else None,
+               'peak_date': markers[1]['date'] if len(markers) > 1 else None,
+               'peak_name': markers[1]['name'] if len(markers) > 1 else None,
+               'peak_mean': markers[1]['mean'] if len(markers) > 1 else None,
+               'end_date': markers[2]['date'] if len(markers) > 2 else None,
+               'end_name': markers[2]['name'] if len(markers) > 2 else None,
+               'end_mean': markers[2]['mean'] if len(markers) > 2 else None,
+               'duration': data['content'][0]['duration'],
+               'growth_rate': data['content'][0]['growth_rate']
+           }
+           return season_data
+       else:
+           return None
+   else:
+       return None
+
+
+
+
+# Function to add data to the worksheet
+def add_data_to_worksheet(parcel_id, data):
+   row = [
+       parcel_id,
+       data.get('start_date'),
+       data.get('start_name'),
+       data.get('start_mean'),
+       data.get('peak_date'),
+       data.get('peak_name'),
+       data.get('peak_mean'),
+       data.get('end_date'),
+       data.get('end_name'),
+       data.get('end_mean'),
+       data.get('duration'),
+       data.get('growth_rate')
+   ]
+   ws.append(row)
+
+
+
+
+# Loop through parcel IDs from 59224 to 59414 and fetch data
+for parcel_id in range(59244, 59415):
+   phenology_data = fetch_phenology_data(parcel_id)
+
+
+   if phenology_data:
+       add_data_to_worksheet(parcel_id, phenology_data)
+       print(f"Data for parcel {parcel_id} added.")
+   else:
+       print(f"No valid phenology data for parcel {parcel_id}.")
+
+
+# Save the workbook to an Excel file in the Downloads folder
+wb.save(file_path)
+print(f"Data saved to {file_path}.")
