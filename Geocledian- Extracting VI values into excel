@@ -3,7 +3,7 @@ import pandas as pd
 
 
 # Define the API key and base URL
-api_key = 'eb57f876-aae3-4887-9536-6bff47b9291b'
+api_key = '1234'
 base_url = "https://global.geocledian.com/agknow/api/v4/parcels/{}/ndvi"
 
 
