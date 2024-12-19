@@ -1,0 +1,38 @@
+// Import the Farmers list CSV containing Farmer Name and Coordinates
+var farmers = ee.FeatureCollection('projects/ee-basavarajnargal/assets/Farmerslist1');
+
+// Print the farmer data to see the structure
+print(farmers);
+// Function to convert a farmer's coordinates into a polygon geometry
+function createPolygonFromCoordinates(farmer) {
+  // Retrieve the coordinates as a string from the properties
+  var coordinates = ee.String(farmer.get('Coordinates'));
+  
+  // Split the coordinates string into individual coordinate triplets (by space)
+  var coordList = ee.List(coordinates.split(' ')).map(function(coord) {
+    // Split each coordinate triplet by the comma and take the first two values (lon, lat)
+    var lonLat = ee.List(ee.String(coord).split(',')).slice(0, 2).map(function(val) {
+      return ee.Number.parse(val); // Convert each value to a number
+    });
+    return lonLat;  // Return the lat/lon as a list of numbers
+  });
+  
+  // Create a polygon geometry from the coordinates
+  var polygon = ee.Geometry.Polygon(coordList);
+  
+  // Return the farmer feature with the polygon geometry added as a property
+  return farmer.setGeometry(polygon);
+}
+
+// Load the farmers' data (assuming you have already uploaded it to GEE)
+var farmers = ee.FeatureCollection('projects/ee-basavarajnargal/assets/Farmerslist1');
+
+// Apply the function to create polygons for each farmer
+var farmersWithPolygons = farmers.map(createPolygonFromCoordinates);
+
+// Print the farmers with polygon geometries
+print('Farmers with polygons:', farmersWithPolygons);
+
+// Visualize the polygons on the map
+Map.centerObject(farmersWithPolygons, 10);  // Zoom to the region of interest
+Map.addLayer(farmersWithPolygons, {}, 'Farmers Polygons');
