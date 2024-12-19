@@ -1,0 +1,175 @@
+// Define the region of interest (ROI) using the new coordinates
+var cor = [
+  [72.28572635398984, 23.152475004733255],
+  [72.98335818992734, 23.152475004733255],
+  [72.98335818992734, 23.633949214558577],
+  [72.28572635398984, 23.633949214558577],
+  [72.28572635398984, 23.152475004733255]
+];
+
+var geometry = ee.Geometry.Polygon(cor);
+
+// Center the map on the geometry
+Map.centerObject(geometry);
+
+// Define the time range for the image collection (2023)
+var time_start = '2023-04-01', time_end = '2023-10-31';
+
+// Load the Sentinel-1 ImageCollection (VV polarization)
+var sen1 = ee.ImageCollection("COPERNICUS/S1_GRD")
+  .filterDate(time_start, time_end)
+  .filterBounds(geometry)
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+  .select('VV');
+
+// Filter ascending and descending passes
+var asc = sen1.filter(ee.Filter.eq('orbitProperties_pass', 'ASCENDING'));
+var des = sen1.filter(ee.Filter.eq('orbitProperties_pass', 'DESCENDING'));
+
+// Function to compute monthly mean for ascending and descending passes
+var computeMonthlyMeans = function(month) {
+  var asc_month = asc.filter(ee.Filter.calendarRange(month, month, 'month')).mean().rename('asc');
+  var des_month = des.filter(ee.Filter.calendarRange(month, month, 'month')).mean().rename('des');
+  var date = ee.Date.fromYMD(2023, month, 1);
+  return asc_month.addBands(des_month)
+    .set('system:time_start', date.millis())
+    .set('system:index', date.format('YYYY-MM'));
+};
+
+// Generate the monthly ImageCollection
+var months = ee.List.sequence(4, 10);  // April to October
+var sen1_monthly = ee.ImageCollection(months.map(function(month) {
+  return computeMonthlyMeans(month);
+}));
+
+// Apply speckle filtering (focal mean) to the images
+var applySpeckleFilter = function(image) {
+  return image.focalMean(30, 'square', 'meters').copyProperties(image, image.propertyNames());
+};
+var speckledImages = sen1_monthly.map(applySpeckleFilter);
+
+// Add the layers for ascending and descending passes
+Map.addLayer(speckledImages.select('asc').toBands().clip(geometry), {}, 'Ascending', false);
+Map.addLayer(speckledImages.select('des').toBands().clip(geometry), {}, 'Descending', false);
+
+// Step 2: Combine all the FeatureCollections into a single training dataset
+// Correct order as requested: geometrywater, geometrybuildings, geometryGroundnut, geometrymaize, geometryCotton
+
+var geometryWaterFC = ee.FeatureCollection(geometrywater);
+var geometryBuildingsFC = ee.FeatureCollection(geometrybuildings);
+var geometryGroundnutFC = ee.FeatureCollection(geometryGroundnut);
+var geometryMaizeFC = ee.FeatureCollection(geometrymaize);
+var geometryCottonFC = ee.FeatureCollection(geometryCotton);
+
+// Add class labels to each FeatureCollection
+var geometryWaterWithClass = geometryWaterFC.map(function(feature) {
+  return feature.set('class', 0);  // Water class = 0
+});
+
+var geometryBuildingsWithClass = geometryBuildingsFC.map(function(feature) {
+  return feature.set('class', 1);  // Buildings class = 1
+});
+
+var geometryGroundnutWithClass = geometryGroundnutFC.map(function(feature) {
+  return feature.set('class', 2);  // Groundnut class = 2
+});
+
+var geometryMaizeWithClass = geometryMaizeFC.map(function(feature) {
+  return feature.set('class', 3);  // Maize class = 3
+});
+
+var geometryCottonWithClass = geometryCottonFC.map(function(feature) {
+  return feature.set('class', 4);  // Cotton class = 4
+});
+
+// Merge all FeatureCollections into a single dataset
+var trainingData = geometryWaterWithClass
+    .merge(geometryBuildingsWithClass)
+    .merge(geometryGroundnutWithClass)
+    .merge(geometryMaizeWithClass)
+    .merge(geometryCottonWithClass);
+
+// Print the combined training data to verify
+print('Training Data:', trainingData);
+
+// Optionally, visualize the training data on the map
+Map.addLayer(trainingData, {color: 'red'}, 'Training Data');
+
+// Step 3: Sample data from Sentinel-1 (or other satellite data) within the training areas
+var sentinel1 = ee.ImageCollection("COPERNICUS/S1_GRD")
+                  .filterBounds(trainingData)
+                  .filterDate(time_start, time_end)
+                  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+                  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+                  .select('VV');
+
+// Sample data within the training areas
+var trainingSamples = sentinel1.mean().sampleRegions({
+  collection: trainingData,  // Use the polygons as the regions to sample
+  properties: ['class'],     // Class labels for each region
+  scale: 30                  // Resolution (in meters)
+});
+
+// Print the training samples to verify
+print('Training Samples:', trainingSamples);
+
+// Step 4: Train a classifier (e.g., Random Forest)
+var classifier = ee.Classifier.smileRandomForest(10);  // 10 trees in the random forest
+
+// Train the classifier with the samples
+var trainedClassifier = classifier.train({
+  features: trainingSamples,
+  classProperty: 'class',
+  inputProperties: ['VV']
+});
+
+// Step 5: Classify the image using the trained classifier
+var classifiedImage = sentinel1.mean().classify(trainedClassifier);
+
+// Step 6: Visualize the classified image
+Map.addLayer(classifiedImage, {min: 0, max: 4, palette: ['blue', 'green', 'yellow', 'orange', 'red']}, 'Classified Image');
+
+// Step 7: Add a legend to the map
+
+var legend = ui.Panel({
+  style: {
+    position: 'top-right',  // Correct position value
+    padding: '8px'
+  }
+});
+
+// Add title for the legend
+var legendTitle = ui.Label({
+  value: 'Class Legend',
+  style: {fontWeight: 'bold', fontSize: '16px', margin: '0 0 6px 0'}
+});
+legend.add(legendTitle);
+
+// Add the color boxes and labels for each class
+var makeLegendItem = function(color, label) {
+  var colorBox = ui.Label({
+    style: {
+      backgroundColor: color,
+      padding: '8px',
+      margin: '2px',
+      width: '20px',
+      height: '20px'
+    }
+  });
+  var description = ui.Label({
+    value: label,
+    style: {margin: '2px'}
+  });
+  return ui.Panel([colorBox, description], ui.Panel.Layout.Flow('horizontal'));
+};
+
+// Add legend items (correctly matching the classes)
+legend.add(makeLegendItem('blue', 'Water (Class 0)'));
+legend.add(makeLegendItem('green', 'Buildings (Class 1)'));
+legend.add(makeLegendItem('yellow', 'Groundnut (Class 2)'));
+legend.add(makeLegendItem('orange', 'Maize (Class 3)'));
+legend.add(makeLegendItem('red', 'Cotton (Class 4)'));
+
+// Add the legend to the map using Map.add()
+Map.add(legend);
