@@ -1,0 +1,119 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
+from sklearn.metrics import r2_score
+
+
+# Your dataset
+data = {
+   'NDVI': [
+       0.659722, 0.621423, 0.680901, 0.636813, 0.729715, 0.819586, 0.708391, 0.558818, 0.863374, 0.829922,
+       0.751016, 0.75086, 0.686815, 0.624982, 0.517268, 0.612996, 0.727693, 0.520024, 0.474839, 0.759916,
+       0.56413, 0.896267, 0.692146, 0.71836, 0.838575, 0.574213, 0.790266, 0.706182, 0.820972, 0.757929,
+       0.62257, 0.597865, 0.708684, 0.670388, 0.757265, 0.68107, 0.723617, 0.523441, 0.528574, 0.615656,
+       0.649678, 0.754388, 0.644716, 0.592981, 0.484656, 0.775136, 0.730065, 0.730944, 0.645759, 0.690878,
+       0.673814, 0.755812, 0.713363, 0.792948, 0.636226, 0.572712, 0.754027
+   ],
+   'Yield': [
+       167.52, 407.51, 557.77, 243.26, 395.78, 366.84, 258.67, 299.71, 299.71, 590.03,
+       533.09, 331.97, 251.32, 452.12, 82.95, 384.91, 550.43, 399.31, 587.02, 337.62,
+       561, 343.11, 505.72, 267.45, 537.09, 214.25, 573.9, 452.89, 199.27, 557.77,
+       462.81, 231.27, 469.11, 274.01, 406.65, 393.43, 551.7, 253.68, 331.97, 287.09,
+       509.78, 477.13, 590.03, 594.8, 372.29, 408.15, 344.48, 400.02, 279.7, 623.34,
+       645.78, 628.87, 638.42, 643.93, 622.29, 607.34, 686.81
+   ]
+}
+
+
+# Convert the data into a pandas DataFrame
+df = pd.DataFrame(data)
+
+
+# Plot the data to observe the relationship
+plt.scatter(df['NDVI'], df['Yield'], color='blue', label='Data')
+plt.title('NDVI vs Yield')
+plt.xlabel('NDVI')
+plt.ylabel('Yield')
+plt.grid(True)
+plt.show()
+
+
+
+
+# Define an exponential model for fitting (as it seems a nonlinear relationship)
+def exponential(x, a, b):
+   return a * np.exp(b * x)
+
+
+
+
+# Fit the exponential model to the data
+params, covariance = curve_fit(exponential, df['NDVI'], df['Yield'], p0=[500, 0.1])
+
+
+# Get the fitted parameters
+a_fit, b_fit = params
+print(f"Fitted parameters: a = {a_fit}, b = {b_fit}")
+
+
+# Generate the fitted values using the model
+df['Yield_Fitted'] = exponential(df['NDVI'], *params)
+
+
+# Plot the original data and the fitted curve
+plt.scatter(df['NDVI'], df['Yield'], color='blue', label='Data')
+plt.plot(df['NDVI'], df['Yield_Fitted'], color='red', label='Fitted Curve')
+plt.title('NDVI vs Yield - Fitted Curve')
+plt.xlabel('NDVI')
+plt.ylabel('Yield')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+
+# Calculate R-squared value
+r2 = r2_score(df['Yield'], df['Yield_Fitted'])
+print(f"R-squared: {r2:.4f}")
+
+
+
+
+# Function to predict yield based on NDVI input
+def predict_yield(ndvi_value):
+   # Ensure the NDVI value is within the valid range (0 to 1)
+   if ndvi_value < 0 or ndvi_value > 1:
+       raise ValueError("NDVI value must be between 0 and 1.")
+
+
+   # Predict yield using the exponential model
+   predicted_yield = exponential(ndvi_value, *params)
+   return predicted_yield
+
+
+
+
+# Test the model by inputting NDVI values
+while True:
+   try:
+       # Get NDVI value from user input
+       user_input = input("Enter an NDVI value (between 0 and 1) to predict the yield, or 'exit' to quit: ")
+
+
+       if user_input.lower() == 'exit':
+           break
+
+
+       ndvi_value = float(user_input)
+
+
+       # Predict the yield for the given NDVI value
+       predicted_yield = predict_yield(ndvi_value)
+
+
+       # Print the predicted yield
+       print(f"Predicted Yield for NDVI = {ndvi_value}: {predicted_yield:.2f} kg")
+
+
+   except ValueError as e:
+       print(f"Error: {e}")
