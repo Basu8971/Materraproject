@@ -1,0 +1,61 @@
+// Step 1: Load the CSV containing Farmer data with coordinates and names
+var farmers = ee.FeatureCollection('projects/ee-basavarajnargal/assets/Farmerslist1');
+
+// Step 2: Function to create a polygon from a farmer's coordinates (lat, lon)
+function createPolygonFromCoordinates(farmer) {
+  var coordinates = ee.String(farmer.get('Coordinates'));  // Get the coordinates string
+  var coordList = ee.List(coordinates.split(' ')).map(function(coord) {
+    var lonLat = ee.List(ee.String(coord).split(',')).slice(0, 2).map(function(val) {
+      return ee.Number.parse(val);  // Convert each value to a number
+    });
+    return lonLat;  // Return lat/lon as a list of numbers
+  });
+  
+  // Create the polygon geometry
+  return ee.Geometry.Polygon(coordList);
+}
+
+// Step 3: Calculate RVI for each farmer polygon
+var sen1 = ee.ImageCollection("COPERNICUS/S1_GRD")
+  .filterDate('2024-01-01', '2024-12-31')
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+  .select('VV', 'VH');
+
+// Function to calculate RVI for a farmer's polygon and export the image
+function computeRVIForFarmer(farmer) {
+  var geometry = createPolygonFromCoordinates(farmer);
+  
+  // Filter the Sentinel-1 images to the farmer's polygon
+  var filteredSen1 = sen1.filterBounds(geometry);
+  
+  // Calculate the Radar Vegetation Index (RVI)
+  var rvi = filteredSen1.map(function(img) {
+    var sigma = ee.Image(10).pow(img.divide(10));  // Apply log10 scaling
+    var index = sigma.expression('(4 * vh) / (vh + vv)', {
+      'vv': sigma.select('VV'), 'vh': sigma.select('VH')
+    }).rename('RVI');
+    var smooth = index.focalMedian(30, 'square', 'meters');  // Apply a focal median filter
+    return smooth.copyProperties(img, ['system:time_start', 'system:time_end']);
+  });
+  
+  // Export the RVI image for the farmer's polygon
+  Export.image.toDrive({
+    image: rvi.filterDate('2024-01-01', '2024-12-31').toBands().clip(geometry),  // Apply filter and clip
+    description: 'RVI_' + ee.String(farmer.get('Farmer Name')),  // Name the file based on farmer's name
+    scale: 30,  // Resolution in meters (appropriate for Sentinel-1)
+    region: geometry,  // Define the region to export (farmer's polygon)
+    fileFormat: 'GeoTIFF',  // Format for the export file
+    crs: 'EPSG:4326',  // Coordinate reference system
+    maxPixels: 1e8  // Allow larger image sizes to be exported if needed
+  });
+}
+
+// Step 4: Loop through each farmer and export the RVI image
+farmers.evaluate(function(farmersList) {
+  farmersList.features.forEach(function(farmer) {
+    var farmerFeature = ee.Feature(farmer);
+    computeRVIForFarmer(farmerFeature);  // Generate RVI for each farmer's polygon and export
+  });
+});
