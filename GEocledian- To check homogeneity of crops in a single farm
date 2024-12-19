@@ -12,7 +12,7 @@ BASE_URL = "https://global.geocledian.com/agknow/api/v4/parcels/{}/homogeneity"
 # Parameters for the request
 start_date = "2023-06-01"
 end_date = "2023-11-15"
-api_key = "eb57f876-aae3-4887-9536-6bff47b9291b"
+api_key = "1234"
 
 
 
