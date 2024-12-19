@@ -1,0 +1,77 @@
+// Define the geometry (COR1 polygon) as you have already done
+var cor1 = [
+  [72.6709719771248, 23.366385713502485],
+  [72.67034970463334, 23.36463259112341],
+  [72.67150841892777, 23.364750779877454],
+  [72.67200194538651, 23.3646916855136],
+  [72.67234526814042, 23.365775078000656],
+  [72.67174445332108, 23.366228130416346],
+  [72.6709719771248, 23.366385713502485]
+];
+
+// Create the geometry for COR1
+var geometry = ee.Geometry.Polygon(cor1);
+
+// Sentinel-1 ImageCollection for COR1 with the date range from 1 Jan 2024 to 1 Dec 2024
+var sen1 = ee.ImageCollection("COPERNICUS/S1_GRD")
+  .filterDate('2024-01-01', '2024-12-01')  // Filter from 1 Jan 2024 to 1 Dec 2024
+  .filterBounds(geometry)
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+  .select('VV', 'VH');
+
+// Print the ImageCollection to check available images
+print("Sentinel-1 Images for 2024:", sen1);
+
+// Check if there are any images for 2024 by getting the size of the collection
+var count = sen1.size();
+print("Number of Sentinel-1 images in 2024:", count);
+
+// If no data is available for 2024, this will output 0.
+if (count.getInfo() === 0) {
+  print("No data available for 2024.");
+} else {
+  // Calculate Radar Vegetation Index (RVI) for the available images
+  var rvi = sen1.map(function(img) {
+    var sigma = ee.Image(10).pow(img.divide(10));  // Apply log10 scaling
+    var index = sigma.expression('(4 * vh) / (vh + vv)', {
+      'vv': sigma.select('VV'), 'vh': sigma.select('VH')
+    }).rename('RVI');
+    var smooth = index.focalMedian(30, 'square', 'meters');  // Apply a focal median filter
+    return smooth.copyProperties(img, ['system:time_start', 'system:time_end']);
+  });
+
+  // Extract time series data for RVI (mean RVI values per polygon)
+  var rviTimeSeries = rvi.map(function(image) {
+    var meanRVI = image.reduceRegion({
+      reducer: ee.Reducer.mean(),  // Calculate mean RVI for the polygon
+      geometry: geometry,
+      scale: 30,  // Use the appropriate resolution for your region
+      crs: 'EPSG:4326'
+    });
+    return ee.Feature(null, {
+      'date': image.get('system:time_start'),
+      'rvi': meanRVI.get('RVI')  // Store the mean RVI value for each date
+    });
+  });
+
+  // Convert the time series to a FeatureCollection
+  var rviFC = ee.FeatureCollection(rviTimeSeries);
+
+  // Print the RVI FeatureCollection to check the values
+  print(rviFC);
+
+  // Export RVI values as CSV to Google Drive
+  Export.table.toDrive({
+    collection: rviFC,
+    description: 'RVI_CSV_COR1_2024',  // CSV file name
+    fileFormat: 'CSV',  // File format
+    folder: 'test',  // Folder in Google Drive to store the CSV
+    fileNamePrefix: 'RVI_CSV_COR1_2024',  // Prefix for the exported file
+    selectors: ['date', 'rvi']  // Fields to include in the CSV (date and RVI value)
+  });
+
+  // Visualizing RVI for COR1 (optional)
+  Map.addLayer(rvi.mean().clip(geometry), {min: 0, max: 0.5}, 'RVI for COR1');
+  Map.centerObject(geometry, 10);  // Center map around COR1 polygon
