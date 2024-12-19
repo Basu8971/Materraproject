@@ -1,0 +1,55 @@
+// Define COR1 polygon (using the coordinates you provided for COR1)
+var cor1 = [
+  [72.6709719771248, 23.366385713502485],
+  [72.67034970463334, 23.36463259112341],
+  [72.67150841892777, 23.364750779877454],
+  [72.67200194538651, 23.3646916855136],
+  [72.67234526814042, 23.365775078000656],
+  [72.67174445332108, 23.366228130416346],
+  [72.6709719771248, 23.366385713502485]
+];
+
+// Create a geometry (polygon) for COR1
+var geometry = ee.Geometry.Polygon(cor1);
+
+// Add COR1 polygon to the map (in red)
+Map.addLayer(geometry, {color: 'red'}, 'COR1 Polygon');
+Map.centerObject(geometry);
+
+// Sentinel-1 ImageCollection for COR1 with the updated date range (1 January 2024 to 1 December 2024)
+var sen1 = ee.ImageCollection("COPERNICUS/S1_GRD")
+  .filterDate('2024-01-01', '2024-12-01')  // Filter from 1 Jan 2024 to 1 Dec 2024
+  .filterBounds(geometry)
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+  .select('VV', 'VH');
+
+// Print the Sentinel-1 image collection for COR1
+print(sen1);
+
+// Calculate Radar Vegetation Index (RVI) for COR1
+var rvi = sen1.map(function(img) {
+  var sigma = ee.Image(10).pow(img.divide(10));
+  var index = sigma.expression('(4 * vh)/(vh + vv)', {
+    'vv': sigma.select('VV'), 'vh': sigma.select('VH')
+  }).rename('RVI');
+  var smooth = index.focalMedian(30, 'square', 'meters');
+  return smooth.copyProperties(img, ['system:time_start', 'system:time_end']);
+});
+
+// Plot RVI for COR2 using a time series chart
+print(
+  ui.Chart.image.series(rvi, geometry, ee.Reducer.mean(), 10, 'system:time_start')
+);
+
+// Plot Sentinel-1 for COR2 using a time series chart
+print(
+  ui.Chart.image.series(sen1, geometry, ee.Reducer.mean(), 10, 'system:time_start')
+);
+
+// Add RVI for 2024 to the map (1 Jan 2024 to 1 Dec 2024) for COR1
+Map.addLayer(rvi.filterDate('2024-01-01', '2024-12-01').toBands().clip(geometry), [], 'RVI for 2024', false);
+
+
+Export.image.toDrive({ image: rvi.filterDate('2024-01-01', '2024-12-05').toBands().clip(geometry), // Apply filter and clip description: 'RVI_Cor1_2023_2024', // Name of the export file scale: 30, // Resolution in meters (appropriate for Sentinel-1) region: geometry, // Define the region to export (COR1 polygon) fileFormat: 'GeoTIFF', // Format for the export file crs: 'EPSG:4326', // Coordinate reference system maxPixels: 1e8 // Allow larger image sizes to be exported if needed }); this code worked thank you
