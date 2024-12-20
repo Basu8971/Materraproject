@@ -1,0 +1,79 @@
+// Define COR1 polygon (using the coordinates you provided for COR1)
+var cor1 = [
+  [72.6709719771248, 23.366385713502485],
+  [72.67034970463334, 23.36463259112341],
+  [72.67150841892777, 23.364750779877454],
+  [72.67200194538651, 23.3646916855136],
+  [72.67234526814042, 23.365775078000656],
+  [72.67174445332108, 23.366228130416346],
+  [72.6709719771248, 23.366385713502485]
+];
+
+// Create a geometry (polygon) for COR1
+var geometry = ee.Geometry.Polygon(cor1);
+
+// Add COR1 polygon to the map (in red)
+Map.addLayer(geometry, {color: 'red'}, 'COR1 Polygon');
+Map.centerObject(geometry);
+
+// Sentinel-1 ImageCollection for COR1 with the updated date range (1 January 2024 to 1 December 2024)
+var sen1 = ee.ImageCollection("COPERNICUS/S1_GRD")
+  .filterDate('2024-01-01', '2024-12-01')  // Filter from 1 Jan 2024 to 1 Dec 2024
+  .filterBounds(geometry)
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+  .select('VV', 'VH');
+
+// Print the Sentinel-1 image collection for COR1
+print(sen1);
+
+// Calculate Radar Vegetation Index (RVI) for COR1
+var rvi = sen1.map(function(img) {
+  var sigma = ee.Image(10).pow(img.divide(10));  // Convert to linear scale
+  var index = sigma.expression('(4 * vh)/(vh + vv)', {
+    'vv': sigma.select('VV'), 'vh': sigma.select('VH')
+  }).rename('RVI');
+  var smooth = index.focalMedian(30, 'square', 'meters');
+  return smooth.copyProperties(img, ['system:time_start', 'system:time_end']);
+});
+
+// Calculate RVI4S1 for COR1
+var rvi4s1 = sen1.map(function(img) {
+  var sigma = ee.Image(10).pow(img.divide(10));  // Convert to linear scale
+  var index = sigma.expression('sqrt(1 - (vv / (vh + vv))) * (4 * vh / (vh + vv))', {
+    'vv': sigma.select('VV'), 'vh': sigma.select('VH')
+  }).rename('RVI4S1');
+  var smooth = index.focalMedian(30, 'square', 'meters');
+  return smooth.copyProperties(img, ['system:time_start', 'system:time_end']);
+});
+
+// Calculate PRVI for COR1
+var prvi = sen1.map(function(img) {
+  var sigma = ee.Image(10).pow(img.divide(10));  // Convert to linear scale
+  var index = sigma.expression('(1 - (vv / (vh + vv))) * vh', {
+    'vv': sigma.select('VV'), 'vh': sigma.select('VH')
+  }).rename('PRVI');
+  var smooth = index.focalMedian(30, 'square', 'meters');
+  return smooth.copyProperties(img, ['system:time_start', 'system:time_end']);
+});
+
+// Plot RVI for COR1 using a time series chart
+print(
+  ui.Chart.image.series(rvi, geometry, ee.Reducer.mean(), 10, 'system:time_start')
+);
+
+// Plot RVI4S1 for COR1 using a time series chart
+print(
+  ui.Chart.image.series(rvi4s1, geometry, ee.Reducer.mean(), 10, 'system:time_start')
+);
+
+// Plot PRVI for COR1 using a time series chart
+print(
+  ui.Chart.image.series(prvi, geometry, ee.Reducer.mean(), 10, 'system:time_start')
+);
+
+// Plot all three indices together on the map
+Map.addLayer(rvi.filterDate('2024-01-01', '2024-12-01').toBands().clip(geometry), {min: 0, max: 1}, 'RVI for 2024');
+Map.addLayer(rvi4s1.filterDate('2024-01-01', '2024-12-01').toBands().clip(geometry), {min: 0, max: 1}, 'RVI4S1 for 2024');
+Map.addLayer(prvi.filterDate('2024-01-01', '2024-12-01').toBands().clip(geometry), {min: 0, max: 1}, 'PRVI for 2024');
