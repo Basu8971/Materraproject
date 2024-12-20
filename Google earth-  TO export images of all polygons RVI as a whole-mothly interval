@@ -18,7 +18,7 @@ function createPolygonFromCoordinates(farmer) {
 // Step 3: Generate the union geometry of all farmer polygons
 var allGeometry = farmers.map(createPolygonFromCoordinates).geometry().dissolve();
 
-// Step 4: Load Sentinel-1 ImageCollection and calculate RVI
+// Step 4: Load Sentinel-1 ImageCollection and calculate RVI, RVI4S1, and PRVI
 var sen1 = ee.ImageCollection("COPERNICUS/S1_GRD")
   .filterDate('2024-01-01', '2024-12-31')
   .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
@@ -36,23 +36,59 @@ var calculateRVI = function(img) {
   return rvi.copyProperties(img, ['system:time_start', 'system:time_end']);
 };
 
-// Apply RVI calculation to the Sentinel-1 collection
-var rviCollection = sen1.map(calculateRVI);
+// Function to calculate RVI4S1 for a single image
+var calculateRVI4S1 = function(img) {
+  var sigma = ee.Image(10).pow(img.divide(10));  // Apply log10 scaling
+  var rvi4s1 = sigma.expression('sqrt(1 - (vv / (vh + vv))) * (4 * vh / (vh + vv))', {
+    'vv': sigma.select('VV'),
+    'vh': sigma.select('VH')
+  }).rename('RVI4S1');
+  return rvi4s1.copyProperties(img, ['system:time_start', 'system:time_end']);
+};
 
-// Step 5: Group images by month and calculate monthly mean RVI
+// Function to calculate PRVI for a single image
+var calculatePRVI = function(img) {
+  var sigma = ee.Image(10).pow(img.divide(10));  // Apply log10 scaling
+  var prvi = sigma.expression('(1 - (vv / (vh + vv))) * vh', {
+    'vv': sigma.select('VV'),
+    'vh': sigma.select('VH')
+  }).rename('PRVI');
+  return prvi.copyProperties(img, ['system:time_start', 'system:time_end']);
+};
+
+// Apply RVI, RVI4S1, and PRVI calculation to the Sentinel-1 collection
+var rviCollection = sen1.map(calculateRVI);
+var rvi4s1Collection = sen1.map(calculateRVI4S1);
+var prviCollection = sen1.map(calculatePRVI);
+
+// Step 5: Group images by month and calculate monthly mean RVI, RVI4S1, and PRVI
 var months = ee.List.sequence(1, 12);
 var monthlyRVI = months.map(function(month) {
   var monthlyCollection = rviCollection.filter(ee.Filter.calendarRange(month, month, 'month'));
   return monthlyCollection.mean().set('month', month);  // Calculate the monthly mean RVI
 });
 
+var monthlyRVI4S1 = months.map(function(month) {
+  var monthlyCollection = rvi4s1Collection.filter(ee.Filter.calendarRange(month, month, 'month'));
+  return monthlyCollection.mean().set('month', month);  // Calculate the monthly mean RVI4S1
+});
+
+var monthlyPRVI = months.map(function(month) {
+  var monthlyCollection = prviCollection.filter(ee.Filter.calendarRange(month, month, 'month'));
+  return monthlyCollection.mean().set('month', month);  // Calculate the monthly mean PRVI
+});
+
 // Convert the list of monthly mean images to an ImageCollection
 var monthlyRVICollection = ee.ImageCollection.fromImages(monthlyRVI);
+var monthlyRVI4S1Collection = ee.ImageCollection.fromImages(monthlyRVI4S1);
+var monthlyPRVICollection = ee.ImageCollection.fromImages(monthlyPRVI);
 
-// Combine the monthly mean images into a multi-band image
+// Combine the monthly mean images into multi-band images
 var monthlyRVIImage = monthlyRVICollection.toBands().clip(allGeometry);
+var monthlyRVI4S1Image = monthlyRVI4S1Collection.toBands().clip(allGeometry);
+var monthlyPRVIImage = monthlyPRVICollection.toBands().clip(allGeometry);
 
-// Step 6: Export the multi-band image
+// Step 6: Export the multi-band images
 Export.image.toDrive({
   image: monthlyRVIImage,
   description: 'Monthly_RVI_TimeSeries',
@@ -63,7 +99,32 @@ Export.image.toDrive({
   maxPixels: 1e9  // Allow for larger exports
 });
 
-// Optional: Add the mean RVI to the map for visualization
+Export.image.toDrive({
+  image: monthlyRVI4S1Image,
+  description: 'Monthly_RVI4S1_TimeSeries',
+  scale: 30,  // Resolution in meters
+  region: allGeometry,  // Define the export region (union of all polygons)
+  fileFormat: 'GeoTIFF',  // Format for the export file
+  crs: 'EPSG:4326',  // Coordinate reference system
+  maxPixels: 1e9  // Allow for larger exports
+});
+
+Export.image.toDrive({
+  image: monthlyPRVIImage,
+  description: 'Monthly_PRVI_TimeSeries',
+  scale: 30,  // Resolution in meters
+  region: allGeometry,  // Define the export region (union of all polygons)
+  fileFormat: 'GeoTIFF',  // Format for the export file
+  crs: 'EPSG:4326',  // Coordinate reference system
+  maxPixels: 1e9  // Allow for larger exports
+});
+
+// Optional: Add the mean RVI, RVI4S1, and PRVI to the map for visualization
 var meanRVI = rviCollection.mean().clip(allGeometry);
+var meanRVI4S1 = rvi4s1Collection.mean().clip(allGeometry);
+var meanPRVI = prviCollection.mean().clip(allGeometry);
+
 Map.centerObject(allGeometry, 10);
 Map.addLayer(meanRVI, {min: 0, max: 1, palette: ['blue', 'green', 'yellow', 'orange', 'red']}, 'Mean RVI');
+Map.addLayer(meanRVI4S1, {min: 0, max: 1, palette: ['blue', 'green', 'yellow', 'orange', 'red']}, 'Mean RVI4S1');
+Map.addLayer(meanPRVI, {min: 0, max: 1, palette: ['blue', 'green', 'yellow', 'orange', 'red']}, 'Mean PRVI');
