@@ -1,0 +1,110 @@
+// Import the Farmers list CSV containing Farmer Name and Coordinates
+var farmers = ee.FeatureCollection('projects/ee-basavarajnargal/assets/Farmerslist1'); // Replace with your actual asset path
+
+// Function to create a polygon from a string of coordinates (lat, lon, altitude or just lat, lon)
+function createPolygonFromCoordinates(coordinatesString) {
+  // Split the coordinates string into individual coordinate triplets (lat, lon, altitude)
+  var coordList = ee.List(coordinatesString.split(' ')).map(function(coord) {
+    // Split each coordinate triplet by the comma and take the first two values (lat, lon)
+    var lonLat = ee.List(ee.String(coord).split(',')).slice(0, 2).map(function(val) {
+      return ee.Number.parse(val); // Convert each value to a number
+    });
+    return lonLat;  // Return lat/lon as a list of numbers
+  });
+  
+  // Create a polygon geometry from the list of coordinates (lat, lon)
+  var polygon = ee.Geometry.Polygon(coordList);
+  
+  // Return the polygon geometry
+  return polygon;
+}
+
+// Function to create a FeatureCollection of polygons for farmers
+function createFeatureCollection(farmers) {
+  return farmers.map(function(farmer) {
+    // Get the coordinates from the farmer's data (coordinates as a string)
+    var coordinates = ee.String(farmer.get('Coordinates'));
+    
+    // Create polygon from coordinates string
+    var polygon = createPolygonFromCoordinates(coordinates);
+    
+    // Return the farmer feature with the polygon geometry added as a property
+    return farmer.setGeometry(polygon);
+  });
+}
+
+// Apply the function to create polygons
+var farmersWithPolygons = createFeatureCollection(farmers);
+
+// Define the time range 
+var startDate = '2023-01-01';
+var endDate = '2023-12-31';
+
+// Create a date range
+var dateRange = ee.DateRange(startDate, endDate);
+
+// Load ERA5-Land data (daily aggregation)
+var era5Land = ee.ImageCollection('ECMWF/ERA5_LAND/DAILY_AGGR')
+  .filterDate(dateRange)
+  .select(['total_precipitation_sum', 'temperature_2m_max', 'temperature_2m_min']); // Select bands for total precipitation sum, max, and min temperature
+
+// Function to extract and combine daily data (precipitation, max and min temperature)
+var combinedStats = era5Land.map(function(image) {
+  var date = ee.Date(image.get('system:time_start')).format('YYYY-MM-dd');
+  
+  // Loop through the farmers and extract the data for each farmer's polygon
+  return farmersWithPolygons.map(function(farmer) {
+    var farmerPolygon = farmer.geometry();  // Get the farmer's polygon geometry
+    
+    // Extract the total precipitation sum, max temperature, and min temperature for the region
+    var precipValue = image.reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: farmerPolygon,
+      scale: 250,  // 250-meter resolution for all farmers
+      maxPixels: 1e8
+    }).get('total_precipitation_sum');  // Changed to total_precipitation_sum
+    
+    var maxTemp = image.reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: farmerPolygon,
+      scale: 250,  // 250-meter resolution for all farmers
+      maxPixels: 1e8
+    }).get('temperature_2m_max');
+    
+    var minTemp = image.reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: farmerPolygon,
+      scale: 250,  // 250-meter resolution for all farmers
+      maxPixels: 1e8
+    }).get('temperature_2m_min');
+    
+    // If any data is missing, assign zero or null
+    precipValue = precipValue ? precipValue : 0;
+    maxTemp = maxTemp ? maxTemp : 0;
+    minTemp = minTemp ? minTemp : 0;
+    
+    // Return the feature with the extracted data
+    return ee.Feature(null, {
+      'farmer_name': farmer.get('Farmer Name'),  // Add the farmer's name
+      'date': date,
+      'precipitation': precipValue,
+      'max_temperature': maxTemp,
+      'min_temperature': minTemp
+    });
+  });
+}).flatten();  // Flatten the list of lists into a single FeatureCollection
+
+// Collect the results into a FeatureCollection
+var combinedStatsCollection = ee.FeatureCollection(combinedStats);
+
+// Print the results to the console
+print('Combined Stats:', combinedStatsCollection);
+
+// Export to CSV
+Export.table.toDrive({
+  collection: combinedStatsCollection,
+  description: 'daily_weather_data_2023',
+  fileFormat: 'CSV'
+});
+
+
