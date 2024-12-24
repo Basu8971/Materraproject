@@ -1,0 +1,128 @@
+// Import the Farmers list CSV containing Farmer Name and Coordinates
+var farmers = ee.FeatureCollection('projects/ee-basavarajnargal/assets/Farmerslist1'); // Replace with your actual asset path
+
+// Function to create a polygon from a string of coordinates (lat, lon)
+function createPolygonFromCoordinates(coordinatesString) {
+  // Split the coordinates string into individual coordinate pairs (lat, lon)
+  var coordList = ee.List(coordinatesString.split(' ')).map(function(coord) {
+    var lonLat = ee.List(ee.String(coord).split(',')).slice(0, 2).map(function(val) {
+      return ee.Number.parse(val); // Convert each value to a number
+    });
+    return lonLat;  // Return lat/lon as a list of numbers
+  });
+  
+  // Create a polygon geometry from the list of coordinates (lat, lon)
+  return ee.Geometry.Polygon(coordList);
+}
+
+// Function to create a FeatureCollection of polygons for farmers
+function createFeatureCollection(farmers) {
+  return farmers.map(function(farmer) {
+    var coordinates = ee.String(farmer.get('Coordinates'));  // Get the coordinates as a string
+    var polygon = createPolygonFromCoordinates(coordinates);  // Create polygon from coordinates string
+    return farmer.setGeometry(polygon);  // Add the polygon geometry to the feature
+  });
+}
+
+// Apply the function to create polygons from coordinates for each farmer
+var farmersWithPolygons = createFeatureCollection(farmers);
+
+// Sentinel-1 ImageCollection for 2023 (filtering by date, polarization, etc.)
+var sen1 = ee.ImageCollection("COPERNICUS/S1_GRD")
+  .filterDate('2023-01-01', '2023-12-31')  // Filter from 1 Jan 2023 to 31 Dec 2023
+  .filterBounds(farmersWithPolygons)  // Filter by farmer polygons
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+  .select('VV', 'VH');
+
+// Calculate Radar Vegetation Index (RVI) for each farmer polygon
+var calculateIndices = function(img) {
+  var sigma = ee.Image(10).pow(img.divide(10));  // Convert to linear scale
+  var rvi = sigma.expression('(4 * vh)/(vh + vv)', {
+    'vv': sigma.select('VV'),
+    'vh': sigma.select('VH')
+  }).rename('RVI');
+  
+  var rvi4s1 = sigma.expression('sqrt(1 - (vv / (vh + vv))) * (4 * vh / (vh + vv))', {
+    'vv': sigma.select('VV'),
+    'vh': sigma.select('VH')
+  }).rename('RVI4S1');
+  
+  var prvi = sigma.expression('(1 - (vv / (vh + vv))) * vh', {
+    'vv': sigma.select('VV'),
+    'vh': sigma.select('VH')
+  }).rename('PRVI');
+  
+  return img.addBands([rvi, rvi4s1, prvi]);
+};
+
+// Apply the function to calculate RVI, RVI4S1, and PRVI for each image
+var sen1WithIndices = sen1.map(calculateIndices);
+
+// Function to extract RVI, RVI4S1, and PRVI for each farmer's polygon on each date
+var extractIndicesForFarmers = function(farmer) {
+  var geometry = farmer.geometry();  // Get the polygon geometry of the farmer
+  
+  // Create a time series for each index (RVI, RVI4S1, PRVI) for each farmer
+  var rviTimeSeries = sen1WithIndices.map(function(img) {
+    var rviValue = img.select('RVI').reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: geometry,
+      scale: 30,
+      crs: 'EPSG:4326'
+    }).get('RVI');
+    
+    var rvi4s1Value = img.select('RVI4S1').reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: geometry,
+      scale: 30,
+      crs: 'EPSG:4326'
+    }).get('RVI4S1');
+    
+    var prviValue = img.select('PRVI').reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: geometry,
+      scale: 30,
+      crs: 'EPSG:4326'
+    }).get('PRVI');
+    
+    // Extract the date of the image (system:time_start)
+    var date = img.get('system:time_start');
+    
+    // Return a feature with the farmer name, date, and index values as properties
+    return ee.Feature(null, {
+      'Farmer Name': farmer.get('Farmer Name'),
+      'Date': ee.Date(date).format('YYYY-MM-dd'),
+      'RVI': rviValue,
+      'RVI4S1': rvi4s1Value,
+      'PRVI': prviValue
+    });
+  });
+  
+  return rviTimeSeries;
+};
+
+// Apply the function to extract indices for each farmer
+var farmerTimeSeries = farmersWithPolygons.map(extractIndicesForFarmers);
+
+// Flatten the results (since we get a list of FeatureCollections, we need to flatten them)
+var flattenedTimeSeries = farmerTimeSeries.flatten();
+
+// Print a sample of the results
+print('Farmer Time Series:', flattenedTimeSeries);
+
+// Optionally, if you want to inspect a specific feature, you can print one element (e.g., the first one)
+print('Sample feature:', flattenedTimeSeries.first());
+
+// Export the results as a CSV to Google Drive (if needed)
+Export.table.toDrive({
+  collection: flattenedTimeSeries,
+  description: 'Farmers_Indices_Time_Series_2023',  // CSV file name
+  fileFormat: 'CSV',  // File format
+  folder: 'test',  // Folder in Google Drive to store the CSV
+  fileNamePrefix: 'Farmers_Indices_Time_Series_2023',  // Prefix for the exported file
+  selectors: ['Farmer Name', 'Date', 'RVI', 'RVI4S1', 'PRVI']  // Fields to include in the CSV (Farmer Name, Date, RVI, RVI4S1, PRVI)
+});
+
+
