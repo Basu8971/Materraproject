@@ -1,0 +1,137 @@
+// Step 1: Load the Farmer CSV containing Coordinates and Names
+var farmers = ee.FeatureCollection('projects/ee-basavarajnargal/assets/Farmerslist1');
+
+// Step 2: Define SoilGrids Layers (Including silt, sand, and clay)
+var phh2o = ee.Image("projects/soilgrids-isric/phh2o_mean");
+var soc = ee.Image("projects/soilgrids-isric/soc_mean");
+var nitrogen = ee.Image("projects/soilgrids-isric/nitrogen_mean");
+var silt = ee.Image("projects/soilgrids-isric/silt_mean");
+var sand = ee.Image("projects/soilgrids-isric/sand_mean");
+var clay = ee.Image("projects/soilgrids-isric/clay_mean");
+
+// Step 3: Function to Create Polygons from Farmer Coordinates
+function createPolygonFromCoordinates(farmer) {
+  var coordinates = ee.String(farmer.get('Coordinates'));  // Get coordinates string
+  var coordList = ee.List(coordinates.split(' ')).map(function(coord) {
+    var lonLat = ee.List(ee.String(coord).split(',')).slice(0, 2).map(function(val) {
+      return ee.Number.parse(val);  // Convert lat/lon to numbers
+    });
+    return lonLat;  // Return lat/lon as a list of numbers
+  });
+  
+  // Create the polygon geometry
+  return ee.Feature(ee.Geometry.Polygon(coordList), farmer.toDictionary());  // Keep all farmer attributes
+}
+
+// Step 4: Create Individual Farmer Polygons
+var farmerPolygons = farmers.map(createPolygonFromCoordinates);
+
+// Step 5: Display Polygons on Map (Optional)
+Map.centerObject(farmerPolygons, 6); // Center map on all farmer polygons
+Map.addLayer(farmerPolygons, {color: 'red'}, 'Farmer Polygons');
+
+// Step 6: Extract Soil Data for each Farmer Polygon (for 0-5cm and 5-15cm depths)
+var extractSoilData = function(farmer) {
+  var farmerGeometry = farmer.geometry();  // Get the geometry (polygon) of the farmer
+  
+  // Extract values for pH (0-5cm, 5-15cm)
+  var phh2oValues = phh2o.select([
+    'phh2o_0-5cm_mean', 'phh2o_5-15cm_mean'
+  ]).reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: farmerGeometry,
+    scale: 250,
+    maxPixels: 1e8
+  });
+  
+  // Extract values for SOC (0-5cm, 5-15cm)
+  var socValues = soc.select([
+    'soc_0-5cm_mean', 'soc_5-15cm_mean'
+  ]).reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: farmerGeometry,
+    scale: 250,
+    maxPixels: 1e8
+  });
+  
+  // Extract values for Nitrogen (0-5cm, 5-15cm)
+  var nitrogenValues = nitrogen.select([
+    'nitrogen_0-5cm_mean', 'nitrogen_5-15cm_mean'
+  ]).reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: farmerGeometry,
+    scale: 250,
+    maxPixels: 1e8
+  });
+
+  // Extract values for Silt (0-5cm, 5-15cm)
+  var siltValues = silt.select([
+    'silt_0-5cm_mean', 'silt_5-15cm_mean'
+  ]).reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: farmerGeometry,
+    scale: 250,
+    maxPixels: 1e8
+  });
+
+  // Extract values for Sand (0-5cm, 5-15cm)
+  var sandValues = sand.select([
+    'sand_0-5cm_mean', 'sand_5-15cm_mean'
+  ]).reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: farmerGeometry,
+    scale: 250,
+    maxPixels: 1e8
+  });
+
+  // Extract values for Clay (0-5cm, 5-15cm)
+  var clayValues = clay.select([
+    'clay_0-5cm_mean', 'clay_5-15cm_mean'
+  ]).reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: farmerGeometry,
+    scale: 250,
+    maxPixels: 1e8
+  });
+
+  // Get the Farmer's Name from the farmer's attribute
+  var farmerName = farmer.get('Farmer Name'); // Explicitly get the farmer's name from the attributes
+
+  // Return the extracted data as a feature with FarmerName and soil properties
+  return ee.Feature(null, {
+    'FarmerName': farmerName,  // Include Farmer Name in the output
+    'phh2o_0-5cm': phh2oValues.get('phh2o_0-5cm_mean'),
+    'phh2o_5-15cm': phh2oValues.get('phh2o_5-15cm_mean'),
+    'soc_0-5cm': socValues.get('soc_0-5cm_mean'),
+    'soc_5-15cm': socValues.get('soc_5-15cm_mean'),
+    'nitrogen_0-5cm': nitrogenValues.get('nitrogen_0-5cm_mean'),
+    'nitrogen_5-15cm': nitrogenValues.get('nitrogen_5-15cm_mean'),
+    'silt_0-5cm': siltValues.get('silt_0-5cm_mean'),
+    'silt_5-15cm': siltValues.get('silt_5-15cm_mean'),
+    'sand_0-5cm': sandValues.get('sand_0-5cm_mean'),
+    'sand_5-15cm': sandValues.get('sand_5-15cm_mean'),
+    'clay_0-5cm': clayValues.get('clay_0-5cm_mean'),
+    'clay_5-15cm': clayValues.get('clay_5-15cm_mean')
+  });
+};
+
+// Step 7: Apply the extraction function to all farmer polygons
+var extractedData = farmerPolygons.map(extractSoilData);
+
+// Step 8: Export the extracted data as a CSV (including farmer names and the new soil properties)
+Export.table.toDrive({
+  collection: extractedData,
+  description: 'Farmers_Soil_Extraction_with_Additional_Properties',
+  fileFormat: 'CSV',
+  folder: 'soilgrids',  // Folder in Google Drive
+  fileNamePrefix: 'Farmers_Soil_Extraction_with_Additional_Properties',  // File name prefix
+  selectors: [
+    'FarmerName', // Farmer name (now included correctly)
+    'phh2o_0-5cm', 'phh2o_5-15cm', 
+    'soc_0-5cm', 'soc_5-15cm', 
+    'nitrogen_0-5cm', 'nitrogen_5-15cm',
+    'silt_0-5cm', 'silt_5-15cm',
+    'sand_0-5cm', 'sand_5-15cm',
+    'clay_0-5cm', 'clay_5-15cm'
+  ]  // Include the variables to export
+});
